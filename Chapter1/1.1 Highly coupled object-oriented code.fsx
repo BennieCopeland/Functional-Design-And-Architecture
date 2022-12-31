@@ -21,7 +21,9 @@ module Server =
     module Connection =
         let send (_, _, _) = ()
 
-// Listing 1.1
+///////////////////////
+// Begin Listing 1.1 //
+///////////////////////
 type Observer =
     member this.readAndSendTemperature () =
         let toCelsius (data: Native.Core.Temperature) : float =

@@ -1,4 +1,6 @@
-﻿// Listing 1.2
+﻿///////////////////////
+// Begin Listing 1.2 //
+///////////////////////
 type ISensor =
     abstract member GetData : unit -> float
     abstract member GetName : unit -> string
