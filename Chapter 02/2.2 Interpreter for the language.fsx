@@ -63,62 +63,139 @@ module List =
 ///////////////////////
 // Begin Listing 2.2 //
 ///////////////////////
+module Listing =
+    open Smart.Sensors
 
-open Smart.Sensors
+    type Measurement =
+        | TemperatureCelsius of Thermometer.ThermometerName * float
+        | PressureAtmUnits of Barometers.BarometerName * float
 
-type Measurement =
-    | TemperatureCelsius of Thermometer.ThermometerName * float
-    | PressureAtmUnits of Barometers.BarometerName * float
+    let isTemperature (_ : Measurement) : bool = true
+    let isPressure (_ : Measurement) : bool = true
+    let reportTemperature (_ : Measurement) : IO<unit> = IO ()
+    let reportPressure (_ : Measurement) : IO<unit> = IO ()
 
-let isTemperature (_ : Measurement) : bool = true
-let isPressure (_ : Measurement) : bool = true
-let reportTemperature (_ : Measurement) : IO<unit> = IO ()
-let reportPressure (_ : Measurement) : IO<unit> = IO ()
-
-type Interpret = Measurement list -> Language -> IO<unit>
-let rec interpret : Interpret =
-    fun ms lang ->
-        match lang with
-        | ReadThermometer name :: acts ->
-            let mbTherm = Thermometer.lookup name
-            match mbTherm with
-            | Some therm ->
+    type Interpret = Measurement list -> Language -> IO<unit>
+    let rec interpret : Interpret =
+        fun ms lang ->
+            match lang with
+            | ReadThermometer name :: acts ->
+                let mbTherm = Thermometer.lookup name
+                match mbTherm with
+                | Some therm ->
+                    io {
+                        let! value = Thermometer.read therm
+                        let measurement = TemperatureCelsius (name, value)
+                        return! interpret (measurement :: ms) acts
+                    }
+                | None ->
+                    failwith "Thermometer not found"
+            | ReadBarometer name :: acts ->
+                let mbBar = Barometers.lookup name
+                match mbBar with
+                | Some bar ->
+                    io {
+                        let! value = Barometers.read bar
+                        let measurement = PressureAtmUnits (name, value)
+                        return! interpret (measurement :: ms) acts
+                    }
+                | None ->
+                    failwith "Barometer not found"
+            | ReportTemperature :: acts ->
                 io {
-                    let! value = Thermometer.read therm
-                    let measurement = TemperatureCelsius (name, value)
-                    return! interpret (measurement :: ms) acts
+                    let! _ = List.traverseIO reportTemperature ms
+                    let ms' = List.filter (not << isTemperature) ms
+                    return! interpret ms' acts
                 }
-            | None ->
-                failwith "Thermometer not found"
-        | ReadBarometer name :: acts ->
-            let mbBar = Barometers.lookup name
-            match mbBar with
-            | Some bar ->
+            | ReportAtmospherePressure :: acts ->
                 io {
-                    let! value = Barometers.read bar
-                    let measurement = PressureAtmUnits (name, value)
-                    return! interpret (measurement :: ms) acts
+                    let! _ = List.traverseIO reportPressure ms
+                    let ms' = List.filter (not << isPressure) ms
+                    return! interpret ms' acts
                 }
-            | None ->
-                failwith "Barometer not found"
-        | ReportTemperature :: acts ->
-            io {
-                let! _ = List.traverseIO reportTemperature ms
-                let ms' = List.filter (not << isTemperature) ms
-                return! interpret ms' acts
-            }
-        | ReportAtmospherePressure :: acts ->
-            io {
-                let! _ = List.traverseIO reportPressure ms
-                let ms' = List.filter (not << isPressure) ms
-                return! interpret ms' acts
-            }
-        | ClearData :: acts ->
+            | ClearData :: acts ->
+                interpret [] acts
+            | [] ->
+                IO ()
+
+    type Interpreter = Language -> IO<unit>
+    let interpreter : Interpreter =
+        fun acts ->
             interpret [] acts
-        | [] ->
-            IO ()
 
-type Interpreter = Language -> IO<unit>
-let interpreter : Interpreter =
-    fun acts ->
-        interpret [] acts
+////////////////////////
+// Supporting logging //
+////////////////////////
+module Logging =
+    open Smart.Sensors
+
+    type Measurement =
+        | TemperatureCelsius of Thermometer.ThermometerName * float
+        | PressureAtmUnits of Barometers.BarometerName * float
+
+    let isTemperature (_ : Measurement) : bool = true
+    let isPressure (_ : Measurement) : bool = true
+    let reportTemperature (_ : Measurement) : IO<unit> = IO ()
+    let reportPressure (_ : Measurement) : IO<unit> = IO ()
+    let logStep _ = IO ()
+    
+    type Interpret = Measurement list -> Method -> IO<Measurement list>
+    let interpret : Interpret =
+        fun ms lang ->
+            match lang with
+            | ReadThermometer name ->
+                let mbTherm = Thermometer.lookup name
+                match mbTherm with
+                | Some therm ->
+                    io {
+                        let! value = Thermometer.read therm
+                        let measurement = TemperatureCelsius (name, value)
+                        return (measurement :: ms)
+                    }
+                | None ->
+                    failwith "Thermometer not found"
+            | ReadBarometer name ->
+                let mbBar = Barometers.lookup name
+                match mbBar with
+                | Some bar ->
+                    io {
+                        let! value = Barometers.read bar
+                        let measurement = PressureAtmUnits (name, value)
+                        return (measurement :: ms)
+                    }
+                | None ->
+                    failwith "Barometer not found"
+            | ReportTemperature ->
+                io {
+                    let! _ = List.traverseIO reportTemperature ms
+                    let ms' = List.filter (not << isTemperature) ms
+                    return ms'
+                }
+            | ReportAtmospherePressure ->
+                io {
+                    let! _ = List.traverseIO reportPressure ms
+                    let ms' = List.filter (not << isPressure) ms
+                    return ms'
+                }
+            | ClearData ->
+                IO.retn []
+    
+    type Interpreter' = Measurement list -> Language -> IO<unit>
+    let rec interpreter' : Interpreter' =
+        fun ms lang ->
+            io {
+                match lang with
+                | act :: acts ->
+                    let! ms' = interpret ms act
+                    
+                    do! logStep act
+                    
+                    return! interpreter' ms' acts
+                | [] ->
+                    return ()
+            }
+    
+    type Interpreter = Language -> IO<unit>
+    let interpreter : Interpreter =
+        fun acts ->
+            interpreter' [] acts
